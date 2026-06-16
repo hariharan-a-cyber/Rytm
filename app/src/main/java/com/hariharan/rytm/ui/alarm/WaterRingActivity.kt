@@ -1,0 +1,231 @@
+package com.hariharan.rytm.ui.alarm
+
+import android.app.KeyguardManager
+import android.content.Intent
+import android.os.Build
+import android.os.Bundle
+import android.util.Log
+import android.view.View
+import android.view.WindowManager
+import android.view.animation.AnimationUtils
+import androidx.activity.addCallback
+import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import com.hariharan.rytm.R
+import com.hariharan.rytm.data.entity.CompletionStatus
+import com.hariharan.rytm.data.entity.WaterLog
+import com.hariharan.rytm.databinding.ActivityWaterRingBinding
+import com.hariharan.rytm.repository.HabitRepository
+import com.hariharan.rytm.service.AlarmService
+import com.hariharan.rytm.utils.AlarmScheduler
+import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.*
+import javax.inject.Inject
+
+@AndroidEntryPoint
+class WaterRingActivity : AppCompatActivity() {
+
+    private lateinit var binding: ActivityWaterRingBinding
+
+    @Inject lateinit var repository: HabitRepository
+    @Inject lateinit var alarmScheduler: AlarmScheduler
+
+    private var reminderId: Long = -1L
+    private var amountMl: Int = 250
+    private var scheduledTime: Long = 0L
+    private var isProcessing = false
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val timeoutRunnable = Runnable { finish() }
+    private val SNOOZE_MINUTES = 10
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        setupWindowFlags()
+        setFinishOnTouchOutside(false)
+        super.onCreate(savedInstanceState)
+        
+        handleIntent(intent)
+        
+        Log.d("RytmAlarm", "WaterRingActivity: onCreate $reminderId")
+        
+        binding = ActivityWaterRingBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        onBackPressedDispatcher.addCallback(this) {
+        }
+
+        setupUI()
+        loadWaterStats()
+        startAnimations()
+        handler.postDelayed(timeoutRunnable, 60000L)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        Log.d("RytmAlarm", "WaterRingActivity: onNewIntent")
+        handleIntent(intent)
+        
+        setupUI()
+        loadWaterStats()
+        
+        handler.removeCallbacks(timeoutRunnable)
+        handler.postDelayed(timeoutRunnable, 60000L)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        intent?.let {
+            reminderId = it.getLongExtra(AlarmScheduler.EXTRA_REMINDER_ID, -1L)
+            amountMl = it.getIntExtra(AlarmScheduler.EXTRA_WATER_AMOUNT, 250)
+            scheduledTime = it.getLongExtra(AlarmScheduler.EXTRA_SCHEDULED_TIME, 0L)
+        }
+    }
+
+    private fun setupWindowFlags() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+            val keyguardManager = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
+            keyguardManager.requestDismissKeyguard(this, null)
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                        WindowManager.LayoutParams.FLAG_ALLOW_LOCK_WHILE_SCREEN_ON or
+                        WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                        WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD,
+            )
+        }
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+
+    private fun setupUI() {
+        binding.tvWaterAmountSub.text = getString(R.string.water_goal_format, amountMl)
+
+        binding.btnCompleteCard.setOnClickListener {
+            animatePress(it) { logWaterAndFinish() }
+        }
+
+        binding.btnSnoozeCard.setOnClickListener {
+            animatePress(it) { snoozeWaterAndFinish() }
+        }
+    }
+
+    private fun snoozeWaterAndFinish() {
+        if (isProcessing) return
+        isProcessing = true
+        binding.btnSnoozeCard.isEnabled = false
+        lifecycleScope.launch(Dispatchers.IO) {
+            if (reminderId != -1L) {
+                repository.getWaterReminderById(reminderId)?.let { reminder ->
+                    alarmScheduler.snoozeWaterReminder(reminder, SNOOZE_MINUTES)
+                }
+            }
+            withContext(Dispatchers.Main) { stopAlarmAndFinish() }
+        }
+    }
+
+    private fun startAnimations() {
+        val fluidBreath = AnimationUtils.loadAnimation(this, R.anim.water_fluid_breath)
+        binding.ivWaterRing.startAnimation(fluidBreath)
+        binding.ivWaterIcon.startAnimation(fluidBreath)
+
+        val rotate = AnimationUtils.loadAnimation(this, R.anim.premium_rotate)
+        binding.ivWaterRingBg.startAnimation(rotate)
+
+        val rotateSlow = AnimationUtils.loadAnimation(this, R.anim.premium_rotate_slow)
+        binding.ivWaterRingOuter.startAnimation(rotateSlow)
+
+        val slideIn = AnimationUtils.loadAnimation(this, R.anim.slide_up_fade)
+        binding.motivationContainer.startAnimation(slideIn)
+        binding.waterStatsCard.startAnimation(slideIn)
+        binding.actionsContainer.startAnimation(slideIn)
+    }
+
+    private fun animatePress(view: View, action: () -> Unit) {
+        view.animate()
+            .scaleX(0.95f)
+            .scaleY(0.95f)
+            .setDuration(100)
+            .withEndAction {
+                view.animate()
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .setDuration(100)
+                    .withEndAction { action() }
+                    .start()
+            }
+            .start()
+    }
+
+    private fun loadWaterStats() {
+        lifecycleScope.launch {
+            try {
+                val today = WaterLog.getCurrentDate()
+                repository.ensureWaterLogExists(today)
+
+                val activeReminders = repository.getAllWaterRemindersOnce().filter { it.isActive }
+                val remindersSum = activeReminders.sumOf { it.amountMl }
+
+                repository.getWaterLogForDate(today).collect { log ->
+                    val manualGoal = log?.goal ?: 0
+                    val trueTargetMl = if (manualGoal > 0) {
+                        if (remindersSum > manualGoal) remindersSum else manualGoal
+                    } else {
+                        remindersSum
+                    }
+                    val actualLog = log ?: WaterLog(today, 0, 8)
+                    
+                    val currentMl = actualLog.totalMl
+                    val remainingMl = (trueTargetMl - currentMl).coerceAtLeast(0)
+                    val percent = if (trueTargetMl > 0) ((currentMl * 100) / trueTargetMl) else 0
+
+                    withContext(Dispatchers.Main) {
+                        binding.tvWaterStatRemaining.text = "${remainingMl}ml"
+                        binding.tvWaterStatGlasses.text = "${actualLog.count} done"
+                        binding.tvWaterStatPercent.text = "$percent%"
+                        binding.progressRing.progress = percent
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    private fun logWaterAndFinish() {
+        if (isProcessing) return
+        isProcessing = true
+        binding.btnCompleteCard.isEnabled = false
+
+        val today = WaterLog.getCurrentDate()
+        lifecycleScope.launch(Dispatchers.IO) {
+            repository.ensureWaterLogExists(today)
+            repository.addWater(today, amountMl)
+            if (reminderId != -1L) {
+                repository.logWaterReminderCompletion(reminderId, CompletionStatus.COMPLETED, scheduledTime)
+                alarmScheduler.rescheduleWaterForNextDay(repository, reminderId)
+            }
+            
+            delay(800)
+            withContext(Dispatchers.Main) {
+                stopAlarmAndFinish()
+            }
+        }
+    }
+
+    private fun stopAlarmAndFinish() {
+        handler.removeCallbacks(timeoutRunnable)
+        val stopIntent = Intent(this, AlarmService::class.java).apply {
+            action = AlarmService.ACTION_STOP_ALARM
+        }
+        startService(stopIntent)
+        finish()
+    }
+
+    override fun onDestroy() {
+        Log.d("RytmAlarm", "WaterRingActivity: onDestroy")
+        super.onDestroy()
+        handler.removeCallbacks(timeoutRunnable)
+    }
+}

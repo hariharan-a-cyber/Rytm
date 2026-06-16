@@ -1,0 +1,306 @@
+package com.hariharan.rytm.repository
+
+import com.hariharan.rytm.data.dao.*
+import com.hariharan.rytm.data.database.AppDatabase
+import com.hariharan.rytm.data.entity.*
+import kotlinx.coroutines.flow.Flow
+import javax.inject.Inject
+import javax.inject.Singleton
+
+@Singleton
+class HabitRepository @Inject constructor(
+    private val db: AppDatabase,
+    private val habitDao: HabitDao,
+    private val reminderDao: ReminderDao,
+    private val waterReminderDao: WaterReminderDao,
+    private val waterLogDao: WaterLogDao,
+    private val completionLogDao: CompletionLogDao,
+    private val appSettingsDao: AppSettingsDao,
+    private val waterReminderLogDao: WaterReminderLogDao
+) {
+
+    // --- Habits -----------------------------------------------------------------
+
+    fun getAllActiveHabits(): Flow<List<Habit>> = habitDao.getAllActiveHabits()
+
+    fun getAllHabits(): Flow<List<Habit>> = habitDao.getAllHabits()
+
+    fun getHabitsWithReminders(): Flow<List<HabitWithReminders>> =
+        habitDao.getHabitsWithReminders()
+
+    suspend fun getHabitsWithRemindersOnce(): List<HabitWithReminders> =
+        habitDao.getHabitsWithRemindersOnce()
+
+    suspend fun getHabitWithReminders(habitId: Long): HabitWithReminders? =
+        habitDao.getHabitWithReminders(habitId)
+
+    suspend fun insertHabit(habit: Habit): Long = habitDao.insertHabit(habit)
+
+    suspend fun updateHabit(habit: Habit) = habitDao.updateHabit(habit)
+
+    suspend fun deleteHabit(habit: Habit) = habitDao.deleteHabit(habit)
+
+    suspend fun setHabitActive(habitId: Long, isActive: Boolean) =
+        habitDao.setHabitActive(habitId, isActive)
+
+    suspend fun updateReminderLastScheduledAt(reminderId: Long, timestamp: Long) =
+        reminderDao.updateLastScheduledAt(reminderId, timestamp)
+
+    // --- Reminders --------------------------------------------------------------
+
+    fun getRemindersForHabit(habitId: Long): Flow<List<Reminder>> =
+        reminderDao.getRemindersForHabit(habitId)
+
+    suspend fun getRemindersForHabitOnce(habitId: Long): List<Reminder> =
+        reminderDao.getRemindersForHabitOnce(habitId)
+
+    suspend fun getAllActiveReminders(): List<Reminder> =
+        reminderDao.getAllActiveReminders()
+
+    suspend fun insertReminder(reminder: Reminder): Long =
+        reminderDao.insertReminder(reminder)
+
+    suspend fun deleteReminder(reminder: Reminder) =
+        reminderDao.deleteReminder(reminder)
+
+    suspend fun deleteRemindersForHabit(habitId: Long) =
+        reminderDao.deleteRemindersForHabit(habitId)
+
+    suspend fun replaceRemindersForHabit(habitId: Long, reminders: List<Reminder>) {
+        reminderDao.replaceRemindersForHabit(habitId, reminders)
+    }
+
+    // --- Water Reminders --------------------------------------------------------
+
+    fun getAllWaterReminders(): Flow<List<WaterReminder>> = waterReminderDao.getAllReminders()
+
+    suspend fun getAllWaterRemindersOnce(): List<WaterReminder> = waterReminderDao.getAllRemindersOnce()
+
+    suspend fun insertWaterReminder(reminder: WaterReminder): Long = waterReminderDao.insertReminder(reminder)
+
+    suspend fun updateWaterReminder(reminder: WaterReminder) = waterReminderDao.updateReminder(reminder)
+
+    suspend fun deleteWaterReminder(reminder: WaterReminder) = waterReminderDao.deleteReminder(reminder)
+
+    suspend fun getWaterReminderById(id: Long): WaterReminder? = waterReminderDao.getReminderById(id)
+
+    suspend fun updateWaterReminderLastScheduledAt(reminderId: Long, timestamp: Long) =
+        waterReminderDao.updateLastScheduledAt(reminderId, timestamp)
+
+    suspend fun logWaterReminderCompletion(reminderId: Long, status: CompletionStatus, scheduledAt: Long) {
+        waterReminderLogDao.insertLog(
+            WaterReminderLog(
+                reminderId = reminderId,
+                status = status,
+                scheduledAt = scheduledAt
+            )
+        )
+    }
+
+    // --- Water Logs -------------------------------------------------------------
+
+    fun getWaterLogForDate(date: String): Flow<WaterLog?> = waterLogDao.getLogForDate(date)
+
+    suspend fun updateWaterCount(date: String, count: Int) = waterLogDao.updateCount(date, count)
+
+    suspend fun updateWaterGoal(date: String, goal: Int) {
+        ensureWaterLogExists(date)
+        waterLogDao.updateGoal(date, goal)
+    }
+
+    suspend fun incrementWaterCount(date: String) {
+        waterLogDao.incrementWaterCount(date)
+    }
+
+    suspend fun addWater(date: String, amount: Int) {
+        waterLogDao.addWaterMl(date, amount)
+    }
+
+    suspend fun addWaterWithLimit(date: String, amount: Int): Boolean {
+        val currentLog = waterLogDao.getLogForDateOnce(date)
+        val currentMl = currentLog?.totalMl ?: 0
+        val manualGoal = currentLog?.goal ?: 0
+
+        val reminders = waterReminderDao.getAllActiveReminders()
+        val remindersSum = reminders.sumOf { it.amountMl }
+        val targetMl = if (manualGoal > 0) {
+            if (remindersSum > manualGoal) remindersSum else manualGoal
+        } else {
+            remindersSum
+        }
+        
+        if (currentMl >= targetMl) {
+            return false
+        }
+        
+        addWater(date, amount)
+        return true
+    }
+
+    suspend fun ensureWaterLogExists(date: String) {
+        val existing = waterLogDao.getLogForDateOnce(date)
+        if (existing == null) {
+            val lastGoal = waterLogDao.getLastGoal()
+            if (lastGoal != null) {
+                // If we have a goal from a previous day, carry it forward
+                waterLogDao.insertIfMissing(WaterLog(date = date, goal = lastGoal, count = 0))
+            } else {
+                // First time setup: default to 0 and let user set it (or reminders sum override)
+                waterLogDao.insertIfMissing(WaterLog(date = date, goal = 0, count = 0))
+            }
+        }
+    }
+
+    // --- Completion Logs --------------------------------------------------------
+
+    suspend fun logCompletion(log: CompletionLog) = completionLogDao.insertLog(log)
+
+    fun getLogsForHabit(habitId: Long): Flow<List<CompletionLog>> =
+        completionLogDao.getLogsForHabit(habitId)
+
+    fun getAllLogs(): Flow<List<CompletionLog>> = completionLogDao.getAllLogs()
+
+    fun getLogsInRange(startMs: Long, endMs: Long): Flow<List<CompletionLog>> =
+        completionLogDao.getLogsInRange(startMs, endMs)
+
+    suspend fun getLogsForHabitInRange(
+        habitId: Long, startMs: Long, endMs: Long
+    ): List<CompletionLog> =
+        completionLogDao.getLogsForHabitInRange(habitId, startMs, endMs)
+
+    suspend fun getTotalCompletedCount(habitId: Long): Int =
+        completionLogDao.getTotalCompletedCount(habitId)
+
+    suspend fun getAllLogsFrom(startMs: Long): List<CompletionLog> =
+        completionLogDao.getAllLogsFrom(startMs)
+
+    suspend fun getMissedHabits(): List<HabitWithReminders> {
+        val now = System.currentTimeMillis()
+        val habits = habitDao.getHabitsWithRemindersOnce()
+        val missed = mutableListOf<HabitWithReminders>()
+
+        val todayStart = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+        for (hwr in habits) {
+            if (!hwr.habit.isActive) continue
+            
+            // Check if any reminder for today was missed
+            for (reminder in hwr.reminders) {
+                if (!reminder.isActive) continue
+                
+                val scheduledTime = java.util.Calendar.getInstance().apply {
+                    set(java.util.Calendar.HOUR_OF_DAY, reminder.hour)
+                    set(java.util.Calendar.MINUTE, reminder.minute)
+                    set(java.util.Calendar.SECOND, 0)
+                    set(java.util.Calendar.MILLISECOND, 0)
+                }.timeInMillis
+
+                // If scheduled time is in the past today
+                // FIX: Don't notify if the habit was created AFTER this scheduled time today
+                if (scheduledTime < now && hwr.habit.createdAt < scheduledTime) {
+                    // Check if there is a log for this specific window
+                    val logs = completionLogDao.getLogsForHabitInRange(hwr.habit.id, todayStart, now)
+                    val wasHandled = logs.any { 
+                        (it.reminderId == reminder.id) || (it.reminderId == 0L && it.completedAt >= todayStart)
+                    }
+                    
+                    if (!wasHandled) {
+                        // Automatically log as missed so we don't notify again on next launch
+                        logCompletion(
+                            CompletionLog(
+                                habitId = hwr.habit.id,
+                                reminderId = reminder.id,
+                                status = CompletionStatus.MISSED,
+                                scheduledAt = scheduledTime,
+                                completedAt = now
+                            )
+                        )
+                        missed.add(hwr)
+                        break // Found one missed reminder for this habit today
+                    }
+                }
+            }
+        }
+        return missed
+    }
+
+    suspend fun getMissedWaterReminders(): List<WaterReminder> {
+        if (!isWaterRemindersEnabledOnce()) return emptyList()
+        
+        val now = System.currentTimeMillis()
+        val reminders = waterReminderDao.getAllActiveReminders()
+        val missed = mutableListOf<WaterReminder>()
+
+        for (reminder in reminders) {
+            val scheduledTime = java.util.Calendar.getInstance().apply {
+                set(java.util.Calendar.HOUR_OF_DAY, reminder.hour)
+                set(java.util.Calendar.MINUTE, reminder.minute)
+                set(java.util.Calendar.SECOND, 0)
+                set(java.util.Calendar.MILLISECOND, 0)
+            }.timeInMillis
+
+            // If scheduled time is in the past today
+            // FIX: Don't notify if it's the very first time adding this reminder (no lastScheduledAt yet)
+            if (scheduledTime < now && reminder.lastScheduledAt != 0L) {
+                val dayStart = java.util.Calendar.getInstance().apply {
+                    set(java.util.Calendar.HOUR_OF_DAY, 0)
+                    set(java.util.Calendar.MINUTE, 0)
+                    set(java.util.Calendar.SECOND, 0)
+                    set(java.util.Calendar.MILLISECOND, 0)
+                }.timeInMillis
+                val dayEnd = dayStart + 24L * 60 * 60 * 1000
+                val log = waterReminderLogDao.getLogForReminderOnDay(reminder.id, dayStart, dayEnd)
+                if (log == null) {
+                    // Automatically log as missed so we don't notify again on next launch
+                    logWaterReminderCompletion(
+                        reminder.id,
+                        CompletionStatus.MISSED,
+                        scheduledTime
+                    )
+                    missed.add(reminder)
+                }
+            }
+        }
+        return missed
+    }
+
+    // --- App Settings -----------------------------------------------------------
+
+    companion object {
+        const val KEY_WATER_REMINDERS_ENABLED = "water_reminders_enabled"
+    }
+
+    suspend fun getSettingOnce(key: String): String? = appSettingsDao.getSettingOnce(key)?.value
+
+    fun getSetting(key: String): Flow<AppSettings?> = appSettingsDao.getSetting(key)
+
+    suspend fun saveSetting(key: String, value: String) {
+        appSettingsDao.saveSetting(AppSettings(key, value))
+    }
+
+    suspend fun isWaterRemindersEnabledOnce(): Boolean =
+        getSettingOnce(KEY_WATER_REMINDERS_ENABLED)?.toBoolean() ?: true
+
+    // --- Backup & Restore -------------------------------------------------------
+
+    suspend fun getEntireBackup(): AppBackup {
+        return AppBackup(
+            habits = habitDao.getAllHabitsOnce(),
+            reminders = reminderDao.getAllRemindersOnce(),
+            completionLogs = completionLogDao.getAllLogsOnce(),
+            waterReminders = waterReminderDao.getAllRemindersOnce(),
+            waterLogs = waterLogDao.getAllLogsOnce(),
+            waterReminderLogs = waterReminderLogDao.getAllLogsOnce(),
+            settings = appSettingsDao.getAllSettingsOnce()
+        )
+    }
+
+    suspend fun restoreFromBackup(backup: AppBackup) {
+        db.restoreFromBackup(backup)
+    }
+}
