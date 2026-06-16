@@ -3,6 +3,7 @@ bin/
 gen/
 out/
 build/
+release/
 .gradle/
 .navigation/
 
