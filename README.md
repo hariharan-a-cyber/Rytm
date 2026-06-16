@@ -95,7 +95,7 @@ It pairs that reliability with a deliberately motivating UX: a cinematic full-sc
 
 ---
 
-## 🛠 Tech Stack
+## Tech Stack
 
 | Layer | Technology |
 |---|---|
@@ -201,7 +201,7 @@ Exact alarms are lost on reboot and can drift on time-zone changes, and Doze can
 
 ---
 
-## ▶ Build & Run
+## Build & Run
 
 **Requirements:** Android Studio (Ladybug or newer), JDK 17, Android SDK 34.
 
@@ -213,7 +213,7 @@ cd Rytm
 ./gradlew assembleDebug
 ```
 
-The compiled debug APK lands in `app/build/outputs/apk/debug/`. A prebuilt APK is also available at **[release/Rytm.apk](release/Rytm.apk)**.
+The compiled debug APK lands in `app/build/outputs/apk/debug/`. A prebuilt APK is also available at **[release/Rytm.apk](https://github.com/hariharan-a-cyber/Rytm/releases/tag/v1.0)**.
 
 ---
 
