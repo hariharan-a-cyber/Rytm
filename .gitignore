@@ -1,32 +1,38 @@
-# Android Build
-/build
-/*/build
+# Built artifacts
+bin/
+gen/
+out/
+build/
+.gradle/
+.navigation/
+
+# Android Studio / IntelliJ
+.idea/
 *.iml
-.gradle
-
-# Local Configuration
+*.iws
+*.ipr
 local.properties
-.idea/caches
-.idea/libraries
-.idea/modules.xml
-.idea/workspace.xml
-.idea/navEditor.xml
-.idea/assetWizardSettings.xml
-.idea/deploymentTargetSelector.xml
-.idea/planningMode.xml
-.idea/migrations.xml
-.idea/markdown.xml
-.idea/runConfigurations.xml
-
-# System Files
-.DS_Store
+.externalNativeBuild/
+.cxx/
 captures/
-.externalNativeBuild
-.cxx
+
+# OS generated files
+.DS_Store
+.DS_Store?
+ehthumbs.db
+Icon?
+Thumbs.db
+
+# Log files
+*.log
 
 # Project specific
 .artifacts/
 .aiexclude
+demo_data.json
+rytm_demo_backup.json
 
-# Log files
-*.log
+# Keys and credentials
+*.jks
+*.keystore
+google-services.json
