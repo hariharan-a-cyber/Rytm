@@ -52,7 +52,8 @@ class WaterReminderFragment : Fragment() {
             viewModel.addWater() 
         }
         binding.btnAddReminder.setOnClickListener { showTimePicker() }
-        binding.switchReminders.setOnCheckedChangeListener { _, isChecked ->
+        binding.switchReminders.setOnClickListener {
+            val isChecked = binding.switchReminders.isChecked
             viewModel.toggleWaterReminders(isChecked)
             val message = if (isChecked) "Water reminders enabled" else "Water reminders disabled"
             Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show()
