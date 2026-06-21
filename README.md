@@ -14,7 +14,7 @@ Rytm doesn't just remind you — it rings full-screen over your lock screen, tra
 [![Target SDK](https://img.shields.io/badge/targetSdk-34-blue)](#)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
-### [⬇ Download the APK](https://github.com/hariharan-a-cyber/Rytm/releases/tag/v1.0)
+### [Download the APK](https://github.com/hariharan-a-cyber/Rytm/releases/tag/v1.0)
 
 <sub>Requires Android 8.0 (Oreo) or newer. You may need to allow "Install from unknown sources".</sub>
 
